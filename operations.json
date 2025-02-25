@@ -1,0 +1,10 @@
+{
+  "mines": {
+    "active": false,
+    "lastUpdated": "2025-02-25T18:47:40.786Z"
+  },
+  "aviator": {
+    "active": true,
+    "lastUpdated": "2025-02-25T18:47:40.815Z"
+  }
+}
