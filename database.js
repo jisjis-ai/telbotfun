@@ -1,7 +1,5 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, get, update, push, child } from 'firebase/database';
-import crypto from 'crypto';
-import moment from 'moment-timezone';
 
 const firebaseConfig = {
   apiKey: "AIzaSyA4UEd-3Le5kLwcrVCS4qMPaCH0cIwFEnc",
@@ -49,6 +47,50 @@ export async function getUser(userId) {
   }
 }
 
+export async function addUser(userId, username, invitedBy = null) {
+  try {
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    const users = snapshot.val() || [];
+    
+    if (!users.some(user => user.id === userId)) {
+      const newUser = {
+        id: userId,
+        username: username,
+        credits: 20, // Créditos iniciais
+        invited_by: invitedBy,
+        join_date: new Date().toISOString(),
+        redeemed_giftcards: [],
+        invites: [],
+        status: 'active'
+      };
+      
+      users.push(newUser);
+      await set(usersRef, users);
+      
+      // Se foi convidado por alguém, adicionar créditos ao convidante
+      if (invitedBy) {
+        const inviter = users.find(user => user.id === invitedBy);
+        if (inviter) {
+          inviter.credits += 4; // Bônus para quem convidou
+          inviter.invites = inviter.invites || [];
+          inviter.invites.push({
+            invited_id: userId,
+            date: new Date().toISOString()
+          });
+          await set(usersRef, users);
+        }
+      }
+      
+      return newUser;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error adding user:', error);
+    return null;
+  }
+}
+
 export async function startRegistration(userId, username) {
   try {
     const pendingRef = ref(database, `pendingRegistrations/${userId}`);
@@ -88,47 +130,16 @@ export async function approveRegistration(userId, invitedBy = null) {
       throw new Error('Registro pendente não encontrado');
     }
     
-    const usersRef = ref(database, 'users');
-    const snapshot = await get(usersRef);
-    const users = snapshot.val() || [];
-    
-    // Adicionar novo usuário com créditos iniciais
-    const newUser = {
-      id: userId,
-      username: pendingData.username,
-      credits: 20, // Créditos iniciais
-      invited_by: invitedBy,
-      join_date: new Date().toISOString(),
-      redeemed_giftcards: [],
-      invites: [],
-      status: 'active',
-      registration_proof: pendingData.proofMessageId
-    };
-    
-    users.push(newUser);
-    await set(usersRef, users);
-    
-    // Se foi convidado por alguém, adicionar créditos ao convidante
-    if (invitedBy) {
-      const inviter = users.find(user => user.id === invitedBy);
-      if (inviter) {
-        inviter.credits += 4; // Bônus para quem convidou
-        inviter.invites = inviter.invites || [];
-        inviter.invites.push({
-          invited_id: userId,
-          date: new Date().toISOString()
-        });
-        await set(usersRef, users);
-      }
+    const result = await addUser(userId, pendingData.username, invitedBy);
+    if (result) {
+      await set(pendingRef, null);
+      return {
+        success: true,
+        user: result
+      };
     }
     
-    // Limpar registro pendente
-    await set(pendingRef, null);
-    
-    return {
-      success: true,
-      user: newUser
-    };
+    throw new Error('Erro ao adicionar usuário');
   } catch (error) {
     console.error('Error approving registration:', error);
     return {
@@ -225,41 +236,9 @@ export async function rejectDeposit(userId, reason) {
   }
 }
 
-export async function addInvite(inviterId, invitedId) {
-  try {
-    const usersRef = ref(database, 'users');
-    const snapshot = await get(usersRef);
-    const users = snapshot.val() || [];
-    const inviter = users.find(user => user.id === inviterId);
-    
-    if (inviter) {
-      inviter.credits = (inviter.credits || 0) + 4; // Bônus por convite
-      inviter.invites = inviter.invites || [];
-      inviter.invites.push({
-        invited_id: invitedId,
-        date: new Date().toISOString()
-      });
-      await set(usersRef, users);
-    }
-  } catch (error) {
-    console.error('Error adding invite:', error);
-  }
-}
-
 export async function getCredits(userId) {
   const user = await getUser(userId);
   return user ? user.credits : 0;
-}
-
-export async function getAllUsers() {
-  try {
-    const usersRef = ref(database, 'users');
-    const snapshot = await get(usersRef);
-    return snapshot.val() || [];
-  } catch (error) {
-    console.error('Error getting all users:', error);
-    return [];
-  }
 }
 
 export async function decrementCredits(userId) {
@@ -501,45 +480,4 @@ export async function getChannelsByOwner(ownerId) {
     console.error('Error getting channels by owner:', error);
     return [];
   }
-}
-
-// Funções do imageGenerator.js mantidas aqui para compatibilidade
-export async function generateMinesImage(prediction) {
-  // ... (código existente mantido)
-}
-
-export function generatePrediction() {
-  // ... (código existente mantido)
-}
-
-export function generateAviatorMultiplier() {
-  // ... (código existente mantido)
-}
-
-export function calculateFutureTime() {
-  // ... (código existente mantido)
-}
-
-export async function generateAviatorImage(multiplier) {
-  // ... (código existente mantido)
-}
-
-export async function sendGiftCardImage(code, credits) {
-  // ... (código existente mantido)
-}
-
-export function isWithinOperatingHours(game) {
-  // ... (código existente mantido)
-}
-
-export function shouldSendPreparationNotice(game) {
-  // ... (código existente mantido)
-}
-
-export function shouldSendSignal() {
-  return true;
-}
-
-export function shouldSendSuccess() {
-  return true;
 }
