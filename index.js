@@ -395,6 +395,88 @@ async function reconnectBot() {
   return false;
 }
 
+async function sendMessageToAllChannels(message, options = {}) {
+  try {
+    // Enviar para o canal principal
+    await bot.sendMessage(process.env.CHANNEL_ID, message, options);
+
+    // Enviar para todos os canais ativos
+    const activeChannels = await getAllActiveChannels();
+    for (const channel of activeChannels) {
+      try {
+        await bot.sendMessage(channel.id, message, options);
+      } catch (error) {
+        console.error(`Error sending message to channel ${channel.id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error in sendMessageToAllChannels:', error);
+  }
+}
+
+async function sendPhotoToAllChannels(photo, options = {}) {
+  try {
+    // Enviar para o canal principal
+    await bot.sendPhoto(process.env.CHANNEL_ID, photo, options);
+
+    // Enviar para todos os canais ativos
+    const activeChannels = await getAllActiveChannels();
+    for (const channel of activeChannels) {
+      try {
+        await bot.sendPhoto(channel.id, photo, options);
+      } catch (error) {
+        console.error(`Error sending photo to channel ${channel.id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error in sendPhotoToAllChannels:', error);
+  }
+}
+
+async function sendDocumentToAllChannels(document, options = {}) {
+  try {
+    // Enviar para o canal principal
+    const mainMessage = await bot.sendDocument(process.env.CHANNEL_ID, document, options);
+
+    // Enviar para todos os canais ativos
+    const activeChannels = await getAllActiveChannels();
+    for (const channel of activeChannels) {
+      try {
+        await bot.sendDocument(channel.id, document, options);
+      } catch (error) {
+        console.error(`Error sending document to channel ${channel.id}:`, error);
+      }
+    }
+    return mainMessage;
+  } catch (error) {
+    console.error('Error in sendDocumentToAllChannels:', error);
+    return null;
+  }
+}
+
+async function editMessageMediaForAllChannels(media, options) {
+  try {
+    // Editar no canal principal
+    await bot.editMessageMedia(media, options);
+
+    // Editar em todos os canais ativos
+    const activeChannels = await getAllActiveChannels();
+    for (const channel of activeChannels) {
+      try {
+        const channelOptions = {
+          ...options,
+          chat_id: channel.id
+        };
+        await bot.editMessageMedia(media, channelOptions);
+      } catch (error) {
+        console.error(`Error editing message in channel ${channel.id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error in editMessageMediaForAllChannels:', error);
+  }
+}
+
 async function sendPreparationNotice(channelId, game) {
   const keyboard = {
     inline_keyboard: [
@@ -407,7 +489,7 @@ async function sendPreparationNotice(channelId, game) {
     ]
   };
 
-  await bot.sendMessage(channelId,
+  await sendMessageToAllChannels(
     MESSAGES.PREPARATION_NOTICE(game),
     { 
       reply_markup: keyboard,
@@ -417,15 +499,13 @@ async function sendPreparationNotice(channelId, game) {
 }
 
 async function checkAndSendPreparationNotices() {
-  const channelId = process.env.CHANNEL_ID;
-  
   if (shouldSendPreparationNotice('mines')) {
-    await sendPreparationNotice(channelId, 'mines');
+    await sendPreparationNotice(process.env.CHANNEL_ID, 'mines');
     await setOperationStatus('mines', false);
   }
   
   if (shouldSendPreparationNotice('aviator')) {
-    await sendPreparationNotice(channelId, 'aviator');
+    await sendPreparationNotice(process.env.CHANNEL_ID, 'aviator');
     await setOperationStatus('aviator', false);
   }
 }
@@ -447,40 +527,24 @@ async function sendMinesSignal(channelId) {
     const prediction = generatePrediction();
     const imageBuffer = await generateMinesImage(prediction);
 
-    // Send to main channel
-    await bot.sendPhoto(channelId, imageBuffer, {
+    // Enviar sinal para todos os canais
+    await sendPhotoToAllChannels(imageBuffer, {
       caption: MESSAGES.MINES_SIGNAL(prediction),
       parse_mode: 'HTML',
       reply_markup: keyboard
     });
 
-    // Send to all active registered channels
-    const activeChannels = await getAllActiveChannels();
-    for (const channel of activeChannels) {
-      try {
-        await bot.sendPhoto(channel.id, imageBuffer, {
-          caption: MESSAGES.MINES_SIGNAL(prediction),
-          parse_mode: 'HTML',
-          reply_markup: keyboard
-        });
-      } catch (error) {
-        console.error(`Error sending mines signal to channel ${channel.id}:`, error);
-      }
-    }
-
     // Aguardar 1 minuto (validade do sinal) + 30 segundos
     await new Promise(resolve => setTimeout(resolve, 90000)); // 60s + 30s
 
-    // Enviar mensagem de green
-    await bot.sendMessage(channelId,
+    // Enviar mensagem de green para todos
+    await sendMessageToAllChannels(
       MESSAGES.MINES_SUCCESS(),
-      { 
-        parse_mode: 'HTML'
-      }
+      { parse_mode: 'HTML' }
     );
 
-    // Enviar GIF de análise
-    const gifMessage = await bot.sendDocument(channelId, 'gpt.gif', {
+    // Enviar GIF de análise para todos
+    const gifMessage = await sendDocumentToAllChannels('gpt.gif', {
       caption: '🤖 Escaneando Oportunidade com inteligência artificial. Aguarde...',
       parse_mode: 'HTML'
     });
@@ -489,8 +553,8 @@ async function sendMinesSignal(channelId) {
     const randomDelay = Math.floor(Math.random() * 29000) + 1000;
     await new Promise(resolve => setTimeout(resolve, randomDelay));
 
-    // Editar mensagem trocando o GIF pela imagem de alerta
-    await bot.editMessageMedia({
+    // Editar mensagem trocando o GIF pela imagem de alerta em todos os canais
+    await editMessageMediaForAllChannels({
       type: 'photo',
       media: 'alert.png',
       caption: '🎯 Sinal Entrado!'
@@ -537,26 +601,12 @@ async function sendAviatorSignal(channelId) {
   const result = await generateAviatorImage(multiplier);
   
   if (result && result.buffer) {
-    // Send to main channel
-    await bot.sendPhoto(channelId, result.buffer, {
+    // Enviar sinal para todos os canais
+    await sendPhotoToAllChannels(result.buffer, {
       caption: MESSAGES.AVIATOR_SIGNAL(multiplier, result.timeStr),
       parse_mode: 'HTML',
       reply_markup: keyboard
     });
-
-    // Send to all active registered channels
-    const activeChannels = await getAllActiveChannels();
-    for (const channel of activeChannels) {
-      try {
-        await bot.sendPhoto(channel.id, result.buffer, {
-          caption: MESSAGES.AVIATOR_SIGNAL(multiplier, result.timeStr),
-          parse_mode: 'HTML',
-          reply_markup: keyboard
-        });
-      } catch (error) {
-        console.error(`Error sending aviator signal to channel ${channel.id}:`, error);
-      }
-    }
 
     // Calcula o tempo até o momento do sinal
     const now = moment().tz('Africa/Maputo');
@@ -570,11 +620,9 @@ async function sendAviatorSignal(channelId) {
 
     // Agenda o envio do green para 30 segundos após o horário do sinal
     aviatorTimeout = setTimeout(async () => {
-      await bot.sendMessage(channelId,
+      await sendMessageToAllChannels(
         MESSAGES.AVIATOR_SUCCESS(),
-        { 
-          parse_mode: 'HTML'
-        }
+        { parse_mode: 'HTML' }
       );
 
       // Agenda o próximo sinal para 30 segundos depois
@@ -819,7 +867,6 @@ async function initBot() {
     pollingRetries = 0;
 
     // Handler principal de mensagens
-   
     bot.on('message', async (msg) => {
       try {
         if (!msg.from) return;
@@ -831,6 +878,8 @@ async function initBot() {
 
         // Primeiro verificar se o usuário é membro do canal
         const isMember = await checkMembership(userId);
+        
+        // Se não for membro do canal e for chat privado
         if (!isMember && isPrivateChat) {
           const keyboard = {
             inline_keyboard: [[
@@ -846,6 +895,7 @@ async function initBot() {
             }
           );
           
+          // Verificar após 20 segundos se o usuário entrou no canal
           setTimeout(async () => {
             const hasJoined = await checkMembership(userId);
             if (hasJoined) {
@@ -853,6 +903,14 @@ async function initBot() {
             }
           }, 20000);
           
+          return;
+        }
+
+        // Se for membro do canal, continuar com o fluxo normal
+        const user = await getUser(userId);
+        if (!user) {
+          await addUser(userId, username);
+          await handleOnboarding(userId, msg);
           return;
         }
 
@@ -1077,28 +1135,6 @@ async function initBot() {
           return;
         }
 
-        // Tratamento de mensagens normais
-        if (!msg.text?.startsWith('/')) {
-          const user = await getUser(userId);
-          if (!user) {
-            await addUser(userId, username);
-          }
-
-          if (state?.onboarding) {
-            await handleOnboarding(userId, msg);
-            return;
-          }
-
-          if (!user || user.credits === 0) {
-            await handleOnboarding(userId, msg);
-            return;
-          }
-
-          if (isPrivateChat) {
-            await sendMainMenu(userId);
-          }
-        }
-
         // Comando /start com referral
         if (msg.text?.startsWith('/start')) {
           const args = msg.text.split(' ');
@@ -1107,11 +1143,6 @@ async function initBot() {
             if (!isNaN(inviterId) && inviterId !== userId) {
               await addInvite(inviterId, userId);
             }
-          }
-          
-          const user = await getUser(userId);
-          if (!user) {
-            await addUser(userId, username);
           }
           
           await handleOnboarding(userId, msg);
@@ -1124,6 +1155,11 @@ async function initBot() {
             await sendAdminMenu(userId);
             return;
           }
+        }
+
+        // Se chegou até aqui e está em chat privado, mostrar menu principal
+        if (isPrivateChat) {
+          await sendMainMenu(userId);
         }
 
       } catch (error) {
