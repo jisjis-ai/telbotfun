@@ -334,8 +334,4 @@ export async function getChannelsByOwner(ownerId) {
     console.error('Error getting channels by owner:', error);
     return [];
   }
-
 }
-=======
-}
->>>>>>> 3816c6d (segundo commjit)
