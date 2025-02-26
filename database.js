@@ -1,126 +1,34 @@
-import fs from 'fs/promises';
-import path from 'path';
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, set, get, update, push, child } from 'firebase/database';
 import crypto from 'crypto';
-import Database from 'better-sqlite3';
 
-const db = new Database('bot.db');
+const firebaseConfig = {
+  apiKey: "AIzaSyA4UEd-3Le5kLwcrVCS4qMPaCH0cIwFEnc",
+  authDomain: "telebot-e1836.firebaseapp.com",
+  projectId: "telebot-e1836",
+  storageBucket: "telebot-e1836.firebasestorage.app",
+  messagingSenderId: "506603344452",
+  appId: "1:506603344452:web:d821f04134c222b4a02211",
+  databaseURL: "https://telebot-e1836-default-rtdb.firebaseio.com"
+};
 
-const USERS_FILE = 'usuarios.json';
-const OPERATIONS_FILE = 'operations.json';
-const GIFTCARDS_FILE = 'giftcards.json';
-const CHANNELS_FILE = 'canais.json';
-
-// Inicializa as tabelas do SQLite
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
-    username TEXT NOT NULL,
-    credits INTEGER DEFAULT 0,
-    invited_by INTEGER,
-    join_date TEXT,
-    redeemed_giftcards TEXT DEFAULT '[]',
-    invites TEXT DEFAULT '[]'
-  );
-
-  CREATE TABLE IF NOT EXISTS operations (
-    name TEXT PRIMARY KEY,
-    active INTEGER DEFAULT 0,
-    last_updated TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS giftcards (
-    code TEXT PRIMARY KEY,
-    credits INTEGER NOT NULL,
-    created_at TEXT,
-    created_by TEXT,
-    redeemed_by TEXT DEFAULT '[]'
-  );
-
-  CREATE TABLE IF NOT EXISTS channels (
-    id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    owner_id INTEGER,
-    added_date TEXT,
-    status TEXT DEFAULT 'pending',
-    member_count INTEGER DEFAULT 0
-  );
-`);
-
-// Helper function to read JSON file
-async function readJsonFile(filename) {
-  try {
-    const data = await fs.readFile(filename, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-}
-
-// Helper function to write JSON file
-async function writeJsonFile(filename, data) {
-  await fs.writeFile(filename, JSON.stringify(data, null, 2), 'utf8');
-}
-
-// Função para sincronizar dados entre SQLite e JSON
-async function syncData() {
-  try {
-    // Sync users
-    const users = db.prepare('SELECT * FROM users').all();
-    await writeJsonFile(USERS_FILE, users);
-
-    // Sync operations
-    const operations = db.prepare('SELECT * FROM operations').all();
-    const operationsObj = operations.reduce((acc, op) => {
-      acc[op.name] = {
-        active: Boolean(op.active),
-        lastUpdated: op.last_updated
-      };
-      return acc;
-    }, {});
-    await writeJsonFile(OPERATIONS_FILE, operationsObj);
-
-    // Sync giftcards
-    const giftcards = db.prepare('SELECT * FROM giftcards').all();
-    await writeJsonFile(GIFTCARDS_FILE, giftcards);
-
-    // Sync channels
-    const channels = db.prepare('SELECT * FROM channels').all();
-    await writeJsonFile(CHANNELS_FILE, { channels });
-  } catch (error) {
-    console.error('Error syncing data:', error);
-  }
-}
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
 
 export async function initDatabase() {
   try {
-    // Initialize operations in SQLite if they don't exist
-    const stmt = db.prepare('INSERT OR IGNORE INTO operations (name, active, last_updated) VALUES (?, ?, ?)');
-    const now = new Date().toISOString();
-    stmt.run('mines', 0, now);
-    stmt.run('aviator', 0, now);
-
-    // Carregar dados dos arquivos JSON para o SQLite se necessário
-    const usersJson = await readJsonFile(USERS_FILE);
-    if (usersJson) {
-      const insertUser = db.prepare('INSERT OR REPLACE INTO users (id, username, credits, invited_by, join_date, redeemed_giftcards, invites) VALUES (?, ?, ?, ?, ?, ?, ?)');
-      for (const user of usersJson) {
-        insertUser.run(
-          user.id,
-          user.username,
-          user.credits,
-          user.invited_by,
-          user.join_date,
-          JSON.stringify(user.redeemed_giftcards),
-          JSON.stringify(user.invites)
-        );
-      }
+    const dbRef = ref(database);
+    const snapshot = await get(dbRef);
+    
+    if (!snapshot.exists()) {
+      await set(ref(database, 'users'), []);
+      await set(ref(database, 'operations'), {
+        mines: { active: false, lastUpdated: new Date().toISOString() },
+        aviator: { active: false, lastUpdated: new Date().toISOString() }
+      });
+      await set(ref(database, 'giftcards'), []);
+      await set(ref(database, 'channels'), []);
     }
-
-    // Sync all data
-    await syncData();
   } catch (error) {
     console.error('Error initializing database:', error);
   }
@@ -128,40 +36,34 @@ export async function initDatabase() {
 
 export async function getUser(userId) {
   try {
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    if (user) {
-      user.redeemed_giftcards = JSON.parse(user.redeemed_giftcards);
-      user.invites = JSON.parse(user.invites);
-      return user;
-    }
-    return null;
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    const users = snapshot.val() || [];
+    return users.find(user => user.id === userId);
   } catch (error) {
     console.error('Error getting user:', error);
-    // Fallback to JSON
-    const users = await readJsonFile(USERS_FILE) || [];
-    return users.find(u => u.id === userId);
+    return null;
   }
 }
 
 export async function addUser(userId, username, invitedBy = null) {
   try {
-    const initialCredits = 20; // 20 créditos para todos os novos usuários
-    const stmt = db.prepare(`
-      INSERT OR IGNORE INTO users (id, username, credits, invited_by, join_date, redeemed_giftcards, invites)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    const users = snapshot.val() || [];
     
-    stmt.run(
-      userId,
-      username,
-      initialCredits,
-      invitedBy,
-      new Date().toISOString(),
-      '[]',
-      '[]'
-    );
-
-    await syncData();
+    if (!users.some(user => user.id === userId)) {
+      users.push({
+        id: userId,
+        username: username,
+        credits: 0,
+        invited_by: invitedBy,
+        join_date: new Date().toISOString(),
+        redeemed_giftcards: [],
+        invites: []
+      });
+      await set(usersRef, users);
+    }
   } catch (error) {
     console.error('Error adding user:', error);
   }
@@ -169,22 +71,19 @@ export async function addUser(userId, username, invitedBy = null) {
 
 export async function addInvite(inviterId, invitedId) {
   try {
-    const user = await getUser(inviterId);
-    if (user) {
-      const invites = JSON.parse(user.invites || '[]');
-      invites.push({
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    const users = snapshot.val() || [];
+    const inviter = users.find(user => user.id === inviterId);
+    
+    if (inviter) {
+      inviter.credits = (inviter.credits || 0) + 1;
+      inviter.invites = inviter.invites || [];
+      inviter.invites.push({
         invited_id: invitedId,
         date: new Date().toISOString()
       });
-
-      const stmt = db.prepare(`
-        UPDATE users 
-        SET credits = credits + 4, invites = ?
-        WHERE id = ?
-      `);
-      
-      stmt.run(JSON.stringify(invites), inviterId);
-      await syncData();
+      await set(usersRef, users);
     }
   } catch (error) {
     console.error('Error adding invite:', error);
@@ -192,28 +91,32 @@ export async function addInvite(inviterId, invitedId) {
 }
 
 export async function getCredits(userId) {
-  try {
-    const user = await getUser(userId);
-    return user ? user.credits : 0;
-  } catch (error) {
-    console.error('Error getting credits:', error);
-    return 0;
-  }
+  const user = await getUser(userId);
+  return user ? user.credits : 0;
 }
 
 export async function getAllUsers() {
   try {
-    return db.prepare('SELECT * FROM users').all();
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    return snapshot.val() || [];
   } catch (error) {
     console.error('Error getting all users:', error);
-    return await readJsonFile(USERS_FILE) || [];
+    return [];
   }
 }
 
 export async function decrementCredits(userId) {
   try {
-    db.prepare('UPDATE users SET credits = credits - 1 WHERE id = ? AND credits > 0').run(userId);
-    await syncData();
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    const users = snapshot.val() || [];
+    const user = users.find(user => user.id === userId);
+    
+    if (user && user.credits > 0) {
+      user.credits--;
+      await set(usersRef, users);
+    }
   } catch (error) {
     console.error('Error decrementing credits:', error);
   }
@@ -221,20 +124,22 @@ export async function decrementCredits(userId) {
 
 export async function getOperationStatus(operation) {
   try {
-    const result = db.prepare('SELECT active FROM operations WHERE name = ?').get(operation);
-    return result ? Boolean(result.active) : false;
+    const operationsRef = ref(database, `operations/${operation}`);
+    const snapshot = await get(operationsRef);
+    return snapshot.val()?.active || false;
   } catch (error) {
     console.error('Error getting operation status:', error);
-    const operations = await readJsonFile(OPERATIONS_FILE) || {};
-    return operations[operation]?.active || false;
+    return false;
   }
 }
 
 export async function setOperationStatus(operation, status) {
   try {
-    db.prepare('UPDATE operations SET active = ?, last_updated = ? WHERE name = ?')
-      .run(status ? 1 : 0, new Date().toISOString(), operation);
-    await syncData();
+    const operationRef = ref(database, `operations/${operation}`);
+    await set(operationRef, {
+      active: status,
+      lastUpdated: new Date().toISOString()
+    });
   } catch (error) {
     console.error('Error setting operation status:', error);
   }
@@ -242,38 +147,37 @@ export async function setOperationStatus(operation, status) {
 
 export async function getAllOperations() {
   try {
-    const operations = db.prepare('SELECT * FROM operations').all();
-    return operations.map(op => ({
-      name: op.name,
-      active: Boolean(op.active)
-    }));
-  } catch (error) {
-    console.error('Error getting all operations:', error);
-    const operations = await readJsonFile(OPERATIONS_FILE) || {};
+    const operationsRef = ref(database, 'operations');
+    const snapshot = await get(operationsRef);
+    const operations = snapshot.val() || {};
     return Object.entries(operations).map(([name, data]) => ({
       name,
       active: data.active
     }));
+  } catch (error) {
+    console.error('Error getting all operations:', error);
+    return [];
   }
 }
 
 export async function createGiftCard(credits) {
   try {
+    const giftcardsRef = ref(database, 'giftcards');
     const code = crypto.randomBytes(4).toString('hex').toUpperCase();
-    const stmt = db.prepare(`
-      INSERT INTO giftcards (code, credits, created_at, created_by, redeemed_by)
-      VALUES (?, ?, ?, ?, ?)
-    `);
     
-    stmt.run(
+    const giftcard = {
       code,
       credits,
-      new Date().toISOString(),
-      'admin',
-      '[]'
-    );
+      created_at: new Date().toISOString(),
+      created_by: 'admin',
+      redeemed_by: []
+    };
     
-    await syncData();
+    const snapshot = await get(giftcardsRef);
+    const giftcards = snapshot.val() || [];
+    giftcards.push(giftcard);
+    await set(giftcardsRef, giftcards);
+    
     return code;
   } catch (error) {
     console.error('Error creating gift card:', error);
@@ -283,46 +187,54 @@ export async function createGiftCard(credits) {
 
 export async function getGiftCard(code) {
   try {
-    const giftcard = db.prepare('SELECT * FROM giftcards WHERE code = ?').get(code);
-    if (giftcard) {
-      giftcard.redeemed_by = JSON.parse(giftcard.redeemed_by);
-      return giftcard;
-    }
-    return null;
+    const giftcardsRef = ref(database, 'giftcards');
+    const snapshot = await get(giftcardsRef);
+    const giftcards = snapshot.val() || [];
+    return giftcards.find(g => g.code === code);
   } catch (error) {
     console.error('Error getting gift card:', error);
-    const giftcards = await readJsonFile(GIFTCARDS_FILE) || [];
-    return giftcards.find(g => g.code === code);
+    return null;
   }
 }
 
 export async function redeemGiftCard(code, userId) {
   try {
-    const giftcard = await getGiftCard(code);
+    const giftcardsRef = ref(database, 'giftcards');
+    const usersRef = ref(database, 'users');
+    
+    const [giftcardsSnapshot, usersSnapshot] = await Promise.all([
+      get(giftcardsRef),
+      get(usersRef)
+    ]);
+    
+    const giftcards = giftcardsSnapshot.val() || [];
+    const users = usersSnapshot.val() || [];
+    
+    const giftcard = giftcards.find(g => g.code === code);
+    const user = users.find(u => u.id === userId);
+    
     if (!giftcard) {
       throw new Error('Código inválido');
     }
-
+    
+    if (!user) {
+      throw new Error('Usuário não encontrado');
+    }
+    
     if (giftcard.redeemed_by.includes(userId)) {
       throw new Error('Você já resgatou este gift card');
     }
-
-    const redeemedBy = [...giftcard.redeemed_by, userId];
-
-    db.prepare(`
-      UPDATE giftcards 
-      SET redeemed_by = ?
-      WHERE code = ?
-    `).run(JSON.stringify(redeemedBy), code);
-
-    db.prepare(`
-      UPDATE users 
-      SET credits = credits + ?,
-          redeemed_giftcards = json_array_append(redeemed_giftcards, ?)
-      WHERE id = ?
-    `).run(giftcard.credits, code, userId);
-
-    await syncData();
+    
+    giftcard.redeemed_by.push(userId);
+    user.credits += giftcard.credits;
+    user.redeemed_giftcards = user.redeemed_giftcards || [];
+    user.redeemed_giftcards.push(code);
+    
+    await Promise.all([
+      set(giftcardsRef, giftcards),
+      set(usersRef, users)
+    ]);
+    
     return giftcard.credits;
   } catch (error) {
     console.error('Error redeeming gift card:', error);
@@ -332,45 +244,38 @@ export async function redeemGiftCard(code, userId) {
 
 export async function getUserGiftCards(userId) {
   try {
-    const giftcards = db.prepare(`
-      SELECT * FROM giftcards 
-      WHERE json_array_contains(redeemed_by, ?)
-    `).all(userId);
-    return giftcards.map(g => ({...g, redeemed_by: JSON.parse(g.redeemed_by)}));
+    const giftcardsRef = ref(database, 'giftcards');
+    const snapshot = await get(giftcardsRef);
+    const giftcards = snapshot.val() || [];
+    return giftcards.filter(g => g.redeemed_by.includes(userId));
   } catch (error) {
     console.error('Error getting user gift cards:', error);
-    const giftcards = await readJsonFile(GIFTCARDS_FILE) || [];
-    return giftcards.filter(g => g.redeemed_by.includes(userId));
-  }
-}
-
-export async function getUserInvites(userId) {
-  try {
-    const user = await getUser(userId);
-    return user ? JSON.parse(user.invites) : [];
-  } catch (error) {
-    console.error('Error getting user invites:', error);
     return [];
   }
 }
 
+export async function getUserInvites(userId) {
+  const user = await getUser(userId);
+  return user ? user.invites || [] : [];
+}
+
 export async function addChannel(channelId, channelTitle, ownerId) {
   try {
-    const stmt = db.prepare(`
-      INSERT OR IGNORE INTO channels (id, title, owner_id, added_date, status, member_count)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const channelsRef = ref(database, 'channels');
+    const snapshot = await get(channelsRef);
+    const channels = snapshot.val() || [];
     
-    stmt.run(
-      channelId,
-      channelTitle,
-      ownerId,
-      new Date().toISOString(),
-      'pending',
-      0
-    );
-    
-    await syncData();
+    if (!channels.some(channel => channel.id === channelId)) {
+      channels.push({
+        id: channelId,
+        title: channelTitle,
+        owner_id: ownerId,
+        added_date: new Date().toISOString(),
+        status: 'pending',
+        member_count: 0
+      });
+      await set(channelsRef, channels);
+    }
   } catch (error) {
     console.error('Error adding channel:', error);
   }
@@ -378,20 +283,18 @@ export async function addChannel(channelId, channelTitle, ownerId) {
 
 export async function updateChannelStatus(channelId, status, memberCount = null) {
   try {
-    const stmt = db.prepare(`
-      UPDATE channels 
-      SET status = ?
-      ${memberCount !== null ? ', member_count = ?' : ''}
-      WHERE id = ?
-    `);
+    const channelsRef = ref(database, 'channels');
+    const snapshot = await get(channelsRef);
+    const channels = snapshot.val() || [];
+    const channel = channels.find(c => c.id === channelId);
     
-    if (memberCount !== null) {
-      stmt.run(status, memberCount, channelId);
-    } else {
-      stmt.run(status, channelId);
+    if (channel) {
+      channel.status = status;
+      if (memberCount !== null) {
+        channel.member_count = memberCount;
+      }
+      await set(channelsRef, channels);
     }
-    
-    await syncData();
   } catch (error) {
     console.error('Error updating channel status:', error);
   }
@@ -399,30 +302,36 @@ export async function updateChannelStatus(channelId, status, memberCount = null)
 
 export async function getChannel(channelId) {
   try {
-    return db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId);
+    const channelsRef = ref(database, 'channels');
+    const snapshot = await get(channelsRef);
+    const channels = snapshot.val() || [];
+    return channels.find(channel => channel.id === channelId);
   } catch (error) {
     console.error('Error getting channel:', error);
-    const channelsData = await readJsonFile(CHANNELS_FILE) || { channels: [] };
-    return channelsData.channels.find(channel => channel.id === channelId);
+    return null;
   }
 }
 
 export async function getAllActiveChannels() {
   try {
-    return db.prepare("SELECT * FROM channels WHERE status = 'active'").all();
+    const channelsRef = ref(database, 'channels');
+    const snapshot = await get(channelsRef);
+    const channels = snapshot.val() || [];
+    return channels.filter(channel => channel.status === 'active');
   } catch (error) {
     console.error('Error getting active channels:', error);
-    const channelsData = await readJsonFile(CHANNELS_FILE) || { channels: [] };
-    return channelsData.channels.filter(channel => channel.status === 'active');
+    return [];
   }
 }
 
 export async function getChannelsByOwner(ownerId) {
   try {
-    return db.prepare('SELECT * FROM channels WHERE owner_id = ?').all(ownerId);
+    const channelsRef = ref(database, 'channels');
+    const snapshot = await get(channelsRef);
+    const channels = snapshot.val() || [];
+    return channels.filter(channel => channel.owner_id === ownerId);
   } catch (error) {
     console.error('Error getting channels by owner:', error);
-    const channelsData = await readJsonFile(CHANNELS_FILE) || { channels: [] };
-    return channelsData.channels.filter(channel => channel.owner_id === ownerId);
+    return [];
   }
 }
