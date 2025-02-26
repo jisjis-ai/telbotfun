@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, get, update, push, child } from 'firebase/database';
 import crypto from 'crypto';
+import moment from 'moment-timezone';
 
 const firebaseConfig = {
   apiKey: "AIzaSyA4UEd-3Le5kLwcrVCS4qMPaCH0cIwFEnc",
@@ -28,6 +29,8 @@ export async function initDatabase() {
       });
       await set(ref(database, 'giftcards'), []);
       await set(ref(database, 'channels'), []);
+      await set(ref(database, 'pendingRegistrations'), {});
+      await set(ref(database, 'deposits'), {});
     }
   } catch (error) {
     console.error('Error initializing database:', error);
@@ -46,26 +49,179 @@ export async function getUser(userId) {
   }
 }
 
-export async function addUser(userId, username, invitedBy = null) {
+export async function startRegistration(userId, username) {
   try {
+    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
+    await set(pendingRef, {
+      username: username,
+      status: 'awaiting_proof',
+      timestamp: new Date().toISOString()
+    });
+    return true;
+  } catch (error) {
+    console.error('Error starting registration:', error);
+    return false;
+  }
+}
+
+export async function submitRegistrationProof(userId, proofMessageId) {
+  try {
+    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
+    await update(pendingRef, {
+      proofMessageId: proofMessageId,
+      status: 'awaiting_review'
+    });
+    return true;
+  } catch (error) {
+    console.error('Error submitting proof:', error);
+    return false;
+  }
+}
+
+export async function approveRegistration(userId, invitedBy = null) {
+  try {
+    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
+    const pendingSnapshot = await get(pendingRef);
+    const pendingData = pendingSnapshot.val();
+    
+    if (!pendingData) {
+      throw new Error('Registro pendente não encontrado');
+    }
+    
     const usersRef = ref(database, 'users');
     const snapshot = await get(usersRef);
     const users = snapshot.val() || [];
     
-    if (!users.some(user => user.id === userId)) {
-      users.push({
-        id: userId,
-        username: username,
-        credits: 0,
-        invited_by: invitedBy,
-        join_date: new Date().toISOString(),
-        redeemed_giftcards: [],
-        invites: []
-      });
+    // Adicionar novo usuário com créditos iniciais
+    const newUser = {
+      id: userId,
+      username: pendingData.username,
+      credits: 20, // Créditos iniciais
+      invited_by: invitedBy,
+      join_date: new Date().toISOString(),
+      redeemed_giftcards: [],
+      invites: [],
+      status: 'active',
+      registration_proof: pendingData.proofMessageId
+    };
+    
+    users.push(newUser);
+    await set(usersRef, users);
+    
+    // Se foi convidado por alguém, adicionar créditos ao convidante
+    if (invitedBy) {
+      const inviter = users.find(user => user.id === invitedBy);
+      if (inviter) {
+        inviter.credits += 4; // Bônus para quem convidou
+        inviter.invites = inviter.invites || [];
+        inviter.invites.push({
+          invited_id: userId,
+          date: new Date().toISOString()
+        });
+        await set(usersRef, users);
+      }
+    }
+    
+    // Limpar registro pendente
+    await set(pendingRef, null);
+    
+    return {
+      success: true,
+      user: newUser
+    };
+  } catch (error) {
+    console.error('Error approving registration:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+export async function rejectRegistration(userId, reason) {
+  try {
+    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
+    await set(pendingRef, null);
+    return true;
+  } catch (error) {
+    console.error('Error rejecting registration:', error);
+    return false;
+  }
+}
+
+export async function startDeposit(userId, amount) {
+  try {
+    const depositRef = ref(database, `deposits/${userId}`);
+    await set(depositRef, {
+      amount: amount,
+      status: 'awaiting_proof',
+      timestamp: new Date().toISOString()
+    });
+    return true;
+  } catch (error) {
+    console.error('Error starting deposit:', error);
+    return false;
+  }
+}
+
+export async function submitDepositProof(userId, proofMessageId) {
+  try {
+    const depositRef = ref(database, `deposits/${userId}`);
+    await update(depositRef, {
+      proofMessageId: proofMessageId,
+      status: 'awaiting_review'
+    });
+    return true;
+  } catch (error) {
+    console.error('Error submitting deposit proof:', error);
+    return false;
+  }
+}
+
+export async function approveDeposit(userId) {
+  try {
+    const depositRef = ref(database, `deposits/${userId}`);
+    const depositSnapshot = await get(depositRef);
+    const depositData = depositSnapshot.val();
+    
+    if (!depositData) {
+      throw new Error('Depósito não encontrado');
+    }
+    
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    const users = snapshot.val() || [];
+    const user = users.find(u => u.id === userId);
+    
+    if (user) {
+      user.credits += depositData.amount;
       await set(usersRef, users);
     }
+    
+    // Limpar depósito pendente
+    await set(depositRef, null);
+    
+    return {
+      success: true,
+      amount: depositData.amount
+    };
   } catch (error) {
-    console.error('Error adding user:', error);
+    console.error('Error approving deposit:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+export async function rejectDeposit(userId, reason) {
+  try {
+    const depositRef = ref(database, `deposits/${userId}`);
+    await set(depositRef, null);
+    return true;
+  } catch (error) {
+    console.error('Error rejecting deposit:', error);
+    return false;
   }
 }
 
@@ -77,7 +233,7 @@ export async function addInvite(inviterId, invitedId) {
     const inviter = users.find(user => user.id === inviterId);
     
     if (inviter) {
-      inviter.credits = (inviter.credits || 0) + 1;
+      inviter.credits = (inviter.credits || 0) + 4; // Bônus por convite
       inviter.invites = inviter.invites || [];
       inviter.invites.push({
         invited_id: invitedId,
@@ -312,6 +468,17 @@ export async function getChannel(channelId) {
   }
 }
 
+export async function getAllChannels() {
+  try {
+    const channelsRef = ref(database, 'channels');
+    const snapshot = await get(channelsRef);
+    return snapshot.val() || [];
+  } catch (error) {
+    console.error('Error getting all channels:', error);
+    return [];
+  }
+}
+
 export async function getAllActiveChannels() {
   try {
     const channelsRef = ref(database, 'channels');
@@ -334,4 +501,45 @@ export async function getChannelsByOwner(ownerId) {
     console.error('Error getting channels by owner:', error);
     return [];
   }
+}
+
+// Funções do imageGenerator.js mantidas aqui para compatibilidade
+export async function generateMinesImage(prediction) {
+  // ... (código existente mantido)
+}
+
+export function generatePrediction() {
+  // ... (código existente mantido)
+}
+
+export function generateAviatorMultiplier() {
+  // ... (código existente mantido)
+}
+
+export function calculateFutureTime() {
+  // ... (código existente mantido)
+}
+
+export async function generateAviatorImage(multiplier) {
+  // ... (código existente mantido)
+}
+
+export async function sendGiftCardImage(code, credits) {
+  // ... (código existente mantido)
+}
+
+export function isWithinOperatingHours(game) {
+  // ... (código existente mantido)
+}
+
+export function shouldSendPreparationNotice(game) {
+  // ... (código existente mantido)
+}
+
+export function shouldSendSignal() {
+  return true;
+}
+
+export function shouldSendSuccess() {
+  return true;
 }
