@@ -93,7 +93,7 @@ export async function addInvite(inviterId, invitedId) {
     const inviter = users.find(user => user.id === inviterId);
     
     if (inviter) {
-      inviter.credits = (inviter.credits || 0) + 4;
+      inviter.credits = (inviter.credits || 0) + 4; // Bônus de 4 créditos
       inviter.invites = inviter.invites || [];
       inviter.invites.push({
         invited_id: invitedId,
