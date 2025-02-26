@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, get, update, push, child } from 'firebase/database';
+import crypto from 'crypto';
 
 const firebaseConfig = {
   apiKey: "AIzaSyA4UEd-3Le5kLwcrVCS4qMPaCH0cIwFEnc",
@@ -27,8 +28,6 @@ export async function initDatabase() {
       });
       await set(ref(database, 'giftcards'), []);
       await set(ref(database, 'channels'), []);
-      await set(ref(database, 'pendingRegistrations'), {});
-      await set(ref(database, 'deposits'), {});
     }
   } catch (error) {
     console.error('Error initializing database:', error);
@@ -61,8 +60,7 @@ export async function addUser(userId, username, invitedBy = null) {
         invited_by: invitedBy,
         join_date: new Date().toISOString(),
         redeemed_giftcards: [],
-        invites: [],
-        status: 'active'
+        invites: []
       };
       
       users.push(newUser);
@@ -81,164 +79,47 @@ export async function addUser(userId, username, invitedBy = null) {
           await set(usersRef, users);
         }
       }
-      
-      return newUser;
     }
-    return null;
   } catch (error) {
     console.error('Error adding user:', error);
-    return null;
   }
 }
 
-export async function startRegistration(userId, username) {
+export async function addInvite(inviterId, invitedId) {
   try {
-    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
-    await set(pendingRef, {
-      username: username,
-      status: 'awaiting_proof',
-      timestamp: new Date().toISOString()
-    });
-    return true;
-  } catch (error) {
-    console.error('Error starting registration:', error);
-    return false;
-  }
-}
-
-export async function submitRegistrationProof(userId, proofMessageId) {
-  try {
-    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
-    await update(pendingRef, {
-      proofMessageId: proofMessageId,
-      status: 'awaiting_review'
-    });
-    return true;
-  } catch (error) {
-    console.error('Error submitting proof:', error);
-    return false;
-  }
-}
-
-export async function approveRegistration(userId, invitedBy = null) {
-  try {
-    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
-    const pendingSnapshot = await get(pendingRef);
-    const pendingData = pendingSnapshot.val();
-    
-    if (!pendingData) {
-      throw new Error('Registro pendente não encontrado');
-    }
-    
-    const result = await addUser(userId, pendingData.username, invitedBy);
-    if (result) {
-      await set(pendingRef, null);
-      return {
-        success: true,
-        user: result
-      };
-    }
-    
-    throw new Error('Erro ao adicionar usuário');
-  } catch (error) {
-    console.error('Error approving registration:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-export async function rejectRegistration(userId, reason) {
-  try {
-    const pendingRef = ref(database, `pendingRegistrations/${userId}`);
-    await set(pendingRef, null);
-    return true;
-  } catch (error) {
-    console.error('Error rejecting registration:', error);
-    return false;
-  }
-}
-
-export async function startDeposit(userId, amount) {
-  try {
-    const depositRef = ref(database, `deposits/${userId}`);
-    await set(depositRef, {
-      amount: amount,
-      status: 'awaiting_proof',
-      timestamp: new Date().toISOString()
-    });
-    return true;
-  } catch (error) {
-    console.error('Error starting deposit:', error);
-    return false;
-  }
-}
-
-export async function submitDepositProof(userId, proofMessageId) {
-  try {
-    const depositRef = ref(database, `deposits/${userId}`);
-    await update(depositRef, {
-      proofMessageId: proofMessageId,
-      status: 'awaiting_review'
-    });
-    return true;
-  } catch (error) {
-    console.error('Error submitting deposit proof:', error);
-    return false;
-  }
-}
-
-export async function approveDeposit(userId) {
-  try {
-    const depositRef = ref(database, `deposits/${userId}`);
-    const depositSnapshot = await get(depositRef);
-    const depositData = depositSnapshot.val();
-    
-    if (!depositData) {
-      throw new Error('Depósito não encontrado');
-    }
-    
     const usersRef = ref(database, 'users');
     const snapshot = await get(usersRef);
     const users = snapshot.val() || [];
-    const user = users.find(u => u.id === userId);
+    const inviter = users.find(user => user.id === inviterId);
     
-    if (user) {
-      user.credits += depositData.amount;
+    if (inviter) {
+      inviter.credits = (inviter.credits || 0) + 4;
+      inviter.invites = inviter.invites || [];
+      inviter.invites.push({
+        invited_id: invitedId,
+        date: new Date().toISOString()
+      });
       await set(usersRef, users);
     }
-    
-    // Limpar depósito pendente
-    await set(depositRef, null);
-    
-    return {
-      success: true,
-      amount: depositData.amount
-    };
   } catch (error) {
-    console.error('Error approving deposit:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-export async function rejectDeposit(userId, reason) {
-  try {
-    const depositRef = ref(database, `deposits/${userId}`);
-    await set(depositRef, null);
-    return true;
-  } catch (error) {
-    console.error('Error rejecting deposit:', error);
-    return false;
+    console.error('Error adding invite:', error);
   }
 }
 
 export async function getCredits(userId) {
   const user = await getUser(userId);
   return user ? user.credits : 0;
+}
+
+export async function getAllUsers() {
+  try {
+    const usersRef = ref(database, 'users');
+    const snapshot = await get(usersRef);
+    return snapshot.val() || [];
+  } catch (error) {
+    console.error('Error getting all users:', error);
+    return [];
+  }
 }
 
 export async function decrementCredits(userId) {
