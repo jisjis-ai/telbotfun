@@ -62,10 +62,11 @@ export async function getUser(userId) {
 export async function addUser(userId, username, invitedBy = null) {
   const users = await readJsonFile(USERS_FILE) || [];
   if (!users.some(user => user.id === userId)) {
+    const initialCredits = invitedBy ? 20 : 20; // 20 créditos para todos os novos usuários
     users.push({
       id: userId,
       username: username,
-      credits: 0,
+      credits: initialCredits,
       invited_by: invitedBy,
       join_date: new Date().toISOString(),
       redeemed_giftcards: [],
@@ -80,7 +81,8 @@ export async function addInvite(inviterId, invitedId) {
   const inviter = users.find(user => user.id === inviterId);
   
   if (inviter) {
-    inviter.credits = (inviter.credits || 0) + 1;
+    // Adiciona 4 créditos para quem convidou
+    inviter.credits = (inviter.credits || 0) + 4;
     inviter.invites = inviter.invites || [];
     inviter.invites.push({
       invited_id: invitedId,
