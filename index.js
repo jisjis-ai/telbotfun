@@ -1529,56 +1529,96 @@ async function initBot() {
             userStates.delete(userId);
           }
           
-          else if (data === 'confirm_broadcast_channel') {
-            const state = userStates.get(userId);
-            
+     else if (data === 'confirm_broadcast_channel') {
+    const state = userStates.get(userId);
+    
+    try {
+        // Obter todos os canais ativos
+        let channels = await getAllActiveChannels();
+
+        // Certificar-se de que o canal principal está incluído
+        const MAIN_CHANNEL_ID = process.env.CHANNEL_ID;
+        if (!channels.some(channel => channel.id === MAIN_CHANNEL_ID)) {
+            channels.push({ id: MAIN_CHANNEL_ID });
+        }
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Função de envio (mídia ou texto)
+        for (const channel of channels) {
             try {
-              if (state.mediaId) {
-                const sendMethod = {
-                  photo: bot.sendPhoto.bind(bot),
-                  video: bot.sendVideo.bind(bot),
-                  document: bot.sendDocument.bind(bot)
-                }[state.mediaType];
+                if (state.mediaId) {
+                    const sendMethod = {
+                        photo: bot.sendPhoto.bind(bot),
+                        video: bot.sendVideo.bind(bot),
+                        document: bot.sendDocument.bind(bot)
+                    }[state.mediaType];
 
-                await sendMethod(process.env.CHANNEL_ID, state.mediaId, {
-                  caption: state.caption,
-                  parse_mode: 'HTML',
-                  reply_markup: state.keyboard
-                });
-              } else {
-                await bot.sendMessage(process.env.CHANNEL_ID, state.text, {
-                  parse_mode: 'HTML',
-                  reply_markup: state.keyboard
-                });
-              }
-
-              await bot.editMessageText(
-                '📣 Mensagem enviada ao canal com sucesso!',
-                {
-                  chat_id: chatId,
-                  message_id: messageId,
-                  reply_markup: {
-                    inline_keyboard: [[{ text: '🔙 Voltar', callback_data: 'admin_menu' }]]
-                  }
+                    await sendMethod(channel.id, state.mediaId, {
+                        caption: state.caption,
+                        parse_mode: 'HTML',
+                        reply_markup: state.keyboard
+                    });
+                } else {
+                    await bot.sendMessage(channel.id, state.text, {
+                        parse_mode: 'HTML',
+                        reply_markup: state.keyboard
+                    });
                 }
-              );
+
+                successCount++;
             } catch (error) {
-              console.error('Error sending broadcast to channel:', error);
-              await bot.editMessageText(
-                '❌ Erro ao enviar mensagem ao canal.',
-                {
-                  chat_id: chatId,
-                  message_id: messageId,
-                  reply_markup: {
-                    inline_keyboard: [[{ text: '🔙 Voltar', callback_data: 'admin_menu' }]]
-                  }
+                console.error(`Erro ao enviar mensagem para o canal ${channel.id}:`, error.message);
+                errorCount++;
+
+                // Se for erro de permissão, marcar canal como inativo
+                if (error.response && error.response.statusCode === 403) {
+                    await updateChannelStatus(channel.id, 'inactive');
                 }
-              );
             }
-            
-            userStates.delete(userId);
-          }
-          
+
+            // Pequeno atraso para evitar bloqueio da API
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // Enviar relatório para o admin
+        await bot.sendMessage(chatId, 
+            `✅ *Broadcast Concluído!*\n\n` +
+            `📢 Mensagem enviada para *${successCount}* canais.\n` +
+            `❌ Falhas em *${errorCount}* canais.`,
+            { parse_mode: 'Markdown' }
+        );
+
+        // Mensagem de sucesso para o admin
+        await bot.editMessageText(
+            '📣 Mensagem enviada com sucesso para todos os canais!',
+            {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🔙 Voltar', callback_data: 'admin_menu' }]]
+                }
+            }
+        );
+
+    } catch (error) {
+        console.error('Erro crítico no envio de broadcast:', error);
+        
+        await bot.editMessageText(
+            '❌ Erro ao enviar mensagens para os canais.',
+            {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🔙 Voltar', callback_data: 'admin_menu' }]]
+                }
+            }
+        );
+    }
+    
+    userStates.delete(userId);
+}       
           else if (data === 'cancel_broadcast') {
             userStates.delete(userId);
             await sendAdminMenu(userId);
