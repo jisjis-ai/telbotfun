@@ -244,6 +244,16 @@ Para começar a usar o bot, você precisa criar uma conta na plataforma.
 1️⃣ Clique no botão abaixo para criar sua conta
 2️⃣ Após criar a conta, envie uma foto da tela de confirmação
 3️⃣ Vamos te guiar para os próximos passos!
+<b>💰 FAÇA SEU PRIMEIRO DEPÓSITO</b>
+
+Aproveite nosso bônus exclusivo de 300%!
+
+💎 <b>Exemplos de Bônus:</b>
+• Depósito de 200MT ➡️ Recebe 600MT
+• Depósito de 500MT ➡️ Recebe 1.500MT
+• Depósito de 1.000MT ➡️ Recebe 3.000MT
+
+📸 Envie uma foto do comprovante do depósito
 `,
 
     DEPOSIT_INFO: `
@@ -323,6 +333,7 @@ Para ter seu próprio bot, siga os passos:
 5. <b>Contato</b>
 • Suporte via bot
 • Resposta em 24h
+📺 Assista ao tutorial para conectar seu bot ao canal/grupo:\n\n👉 [Clique aqui](https://youtu.be/nN57TzQEnqw?si=PiBTZMsc2g8hOXrE
 `,
 
   CHANNEL_REGISTRATION: `
@@ -334,6 +345,7 @@ Por favor, envie o link do seu canal ou grupo.
 • Mínimo 20 membros
 • Bot como admin
 • Todas as permissões
+📺 Assista ao tutorial para conectar seu bot ao canal/grupo:\n\n👉 [Clique aqui](https://youtu.be/nN57TzQEnqw?si=PiBTZMsc2g8hOXrE
 `,
 
   CHANNEL_VERIFICATION: (memberCount) => `
