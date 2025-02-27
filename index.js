@@ -273,8 +273,7 @@ Para começar a usar o bot, compartilhe com seus amigos:
 ⚡️ Compartilhe agora e comece a ganhar!
 `
   },
-
-  WANT_OWN_BOT: `
+const WANT_OWN_BOT = `
 <b>🤖 Quer Seu Próprio Bot de Sinais?</b>
 
 Para ter seu próprio bot, siga os passos:
@@ -293,7 +292,20 @@ Para ter seu próprio bot, siga os passos:
 • Seus dados estão seguros
 • Não compartilhamos informações
 • Uso exclusivo para sinais
-`,
+`;
+
+// Enviar a mensagem principal
+await bot.sendMessage(chatId, WANT_OWN_BOT, { parse_mode: 'HTML' });
+
+// Pequeno delay para organização da mensagem
+await new Promise(resolve => setTimeout(resolve, 1000));
+
+// Enviar a mensagem com o link do tutorial
+await bot.sendMessage(chatId, '📺 Assista ao tutorial para conectar seu bot ao canal/grupo:\n\n👉 [Clique aqui](https://youtu.be/nN57TzQEnqw?si=PiBTZMsc2g8hOXrE)', {
+    parse_mode: 'Markdown',
+    disable_web_page_preview: true
+}),
+
 
   PRIVACY_POLICY: `
 <b>📜 Política de Privacidade</b>
