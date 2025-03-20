@@ -219,12 +219,14 @@ Escolha uma opção:
     return message;
   },
 
-  USERS_LIST: (users) => {
+ USERS_LIST: (users) => {
     let message = '<b>👥 Usuários do Bot:</b>\n\n';
     users.forEach(user => {
-      message += `ID: ${user.id}\nUsername: @${user.username || 'Sem username'}\nCréditos: ${user.credits}\n\n`;
+        message += `ID: ${user.id}\nUsername: @${user.username || 'Sem username'}\nCréditos: ${user.credits}\n\n`;
     });
+    message += `<b>📊 Total de Usuários:</b> ${users.length}`;
     return message;
+
   },
 
   OPERATIONS_STATUS: (operations) => {
